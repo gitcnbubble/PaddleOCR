@@ -16,7 +16,7 @@ import numpy as np
 import paddle
 from paddle.nn import functional as F
 import re
-
+import os
 
 class BaseRecLabelDecode(object):
     """ Convert between text-label and text-index """
@@ -49,6 +49,8 @@ class BaseRecLabelDecode(object):
         self.character = dict_character
         #print(self.character_str)   #Add
     def pred_reverse(self, pred):
+        # 连续的a-Z0-9等字符及空格，当成一个元素，其余字符（阿拉伯字符从右向左）单独一个元素放列表里
+        # 对列表反序输出（其中连续的英文、数字、字符当成一个整体不会反序）
         pred_re = []
         c_current = ''
         for c in pred:
@@ -109,34 +111,55 @@ class CTCLabelDecode(BaseRecLabelDecode):
                  **kwargs):
         super(CTCLabelDecode, self).__init__(character_dict_path,
                                              use_space_char)
+        self.limit_char_dict = ""
+        self.exclude_char_list = ""
 
-    def __call__(self, preds, label=None, *args, **kwargs):
+    def __call__(self, preds, label=None, rec_limit_char_dict="",rec_exclude_char_dict="", *args, **kwargs):
         if isinstance(preds, tuple) or isinstance(preds, list):
             preds = preds[-1]
         if isinstance(preds, paddle.Tensor):
             preds = preds.numpy()
-        '''
-        # 计划增加一个函数，避免来回注释代码
-        limit_char_list = list("0123456789")  # 这里仅识别阿拉伯数字，根据情况增加小数点或其他字符
-        limit_char_list.append("blank")  # 必须增加空值【此项是self.character中的第一项，必须加上！！】
-        # limit_char_list.append(" ")  # 这行应该没有太大影响
-        # 获取要识别的字符（比如0-9）在整个字符集self.character中的位置Index
-        char_ind = [self.character.index(char) for char in limit_char_list]
-        # [26, 93, 25, 94, 632, 631, 933, 29, 27, 1109, 0] 不连续的，和chinese_dict.txt中的次序不一样！
-        # 从preds结果中筛选出我们需要识别字符的概率数据
-        my_preds=preds[:,:,char_ind]
-        # 获取my_preds中的最大概率和对应索引及概率值
-        my_preds_idx = my_preds.argmax(axis=2)  # 注意返回的最大概率序号是mypreds中的序号，也是limit_char_list中的序号，不是preds中的序号
-        preds_prob = my_preds.max(axis=2)
-        # 将序号列表中自定义字符中的次序修改为self.character中的次序
-        preds_idx = np.empty(shape=preds_prob.shape)
-        for i,row in enumerate(my_preds_idx):
-            preds_idx[i,:] = [ char_ind[j] for j in row ]
-        preds_idx = preds_idx.astype(int)
-        
-        '''
-        preds_idx = preds.argmax(axis=2)   #若仅识别特定字符，将上面的块注释去掉，并注释掉这行
-        preds_prob = preds.max(axis=2)     #若仅识别特定字符，将上面的块注释去掉，并注释掉这行
+        if os.path.isfile(rec_limit_char_dict):   # 新增，判定是否指定识别字符范围，默认为空串——不指定范围
+            with open(rec_limit_char_dict, "rb") as fin:
+                lines = fin.readlines()
+                for line in lines:
+                    line = line.decode('utf-8').strip("\n").strip("\r\n")
+                    self.limit_char_list.append(line)
+        elif rec_limit_char_dict !="":      # 注意：当文件名写错的时候【既不是文件、也不为空】，可能会当成给定的字符范围，导致结果错误（不会提示出错）
+            self.limit_char_list = list(rec_limit_char_dict)
+        if os.path.isfile(rec_exclude_char_dict):   # 是否指定了需要排除的字符，如果某个字符即指定了排除、也指定了识别，排除的优先级更高
+            with open(rec_exclude_char_dict, "rb") as fin:
+                lines = fin.readlines()
+                for line in lines:
+                    line = line.decode('utf-8').strip("\n").strip("\r\n")
+                    self.exclude_char_list.append(line)
+        elif rec_exclude_char_dict !="":
+            self.exclude_char_list = list(rec_exclude_char_dict)
+
+        if rec_limit_char_dict =="" and rec_exclude_char_dict=="":
+            preds_idx = preds.argmax(axis=2)   #未指定特定字符，正常识别
+            preds_prob = preds.max(axis=2)  
+        else:
+            # 如果指定了识别字符范围，在识别结果中挑选出给出在字符概率，找到其中的最大概率值
+            if limit_char_list is None:  # 仅指定排除字符时，先将限制查找字符设置为整个字符集
+                limit_char_list = self.character
+            else:
+                limit_char_list.append("blank")  # 必须增加空值【此项是self.character中的第一项，必须加上！！】
+            # 去掉需要排除的字符
+            limit_char_list = [x for x in limit_char_list if x not in self.exclude_char_list]
+            # 获取要识别的字符（比如0-9）在整个字符集self.character中的位置Index
+            char_ind = [self.character.index(char) for char in limit_char_list]
+            # [26, 93, 25, 94, 632, 631, 933, 29, 27, 1109, 0] 不连续的，和chinese_dict.txt中的次序不一样！
+            # 从preds结果中筛选出我们需要识别字符的概率数据
+            my_preds=preds[:,:,char_ind]
+            # 获取my_preds中的最大概率和对应索引及概率值
+            my_preds_idx = my_preds.argmax(axis=2)  # 注意返回的最大概率序号是mypreds中的序号，也是limit_char_list中的序号，不是preds中的序号
+            preds_prob = my_preds.max(axis=2)
+            # 将序号列表中自定义字符中的次序修改为self.character中的次序
+            preds_idx = np.empty(shape=preds_prob.shape)
+            for i,row in enumerate(my_preds_idx):
+                preds_idx[i,:] = [ char_ind[j] for j in row ]
+            preds_idx = preds_idx.astype(int)
 
         text = self.decode(preds_idx, preds_prob, is_remove_duplicate=True)
         if label is None:

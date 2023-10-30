@@ -147,6 +147,18 @@ def init_args():
 
     parser.add_argument("--show_log", type=str2bool, default=True)
     parser.add_argument("--use_onnx", type=str2bool, default=False)
+
+    # 新增自定义参数
+    parser.add_argument("--use_diy_cls", type=str2bool, default=False)  # 使用自定义分类器，比如分类手写和印刷字体，
+    # 参考https://aistudio.baidu.com/projectdetail/3382897，不把名字、功能固定死——方便使用其他自定义分类模型，实现类似插件功能
+    # 传入训练好的模型、配置，就可以实现分类——还要对分类后的处理过程进行更改（传入函数？）
+    # 
+    parser.add_argument("--cls_diymodel_dir", type=str)    # 模型位置
+    parser.add_argument("--diycls_label_list", type=list, default=['0', '1'])  # 默认二分类
+
+    # 注意多字符识别会不会出现错误！
+    parser.add_argument("--rec_limit_char_dict",type=str, default="")  # 在给定字符范围内识别，输入字典文件或字符串
+    parser.add_argument("--rec_exclude_char_dict",type=str, default="")  # 在识别中不要识别哪些字符，输入字典文件或字符串
     return parser
 
 
@@ -172,6 +184,9 @@ def create_predictor(args, mode, logger):
         model_dir = args.sr_model_dir
     elif mode == 'layout':
         model_dir = args.layout_model_dir
+    # 新增diycls模式
+    elif mode == 'diycls':
+        model_dir = args.cls_diymodel_dir
     else:
         model_dir = args.e2e_model_dir
 

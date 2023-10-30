@@ -64,7 +64,7 @@ class TextSystem(object):
             logger.debug(f"{bno}, {rec_res[bno]}")
         self.crop_image_res_index += bbox_num
 
-    def __call__(self, img, cls=True):
+    def __call__(self, img, cls=True, diycls=False):  # 新增diycls参数
         time_dict = {'det': 0, 'rec': 0, 'cls': 0, 'all': 0}
 
         if img is None:
@@ -101,6 +101,14 @@ class TextSystem(object):
             time_dict['cls'] = elapse
             logger.debug("cls num  : {}, elapsed : {}".format(
                 len(img_crop_list), elapse))
+        # 修改如下(代码参考手写字分类，为何用use_diy_cls和diycls两个参数判定是不是使用自定义分类？)
+        # 就好像为什么用use_angle_cls 和 cls来判定是否进行角度分类？cls是分类，角度分类只是其中之一？那么这里的diycls可以使用cls
+        # 推测：cls用来返回分类结果；use_angle_cls——识别等过程中进行分类，但不返回分类结果
+        if self.use_diy_cls and diycls:
+            img_crop_list, diycls_list, elapse = self.diy_classifier(
+                img_crop_list) # 判断各是非进行了自定义分类，并返回自定义分类结果
+            logger.debug("cls diy num  : {}, elapse : {}".format(
+                len(img_crop_list), elapse))
 
         rec_res, elapse = self.text_recognizer(img_crop_list)
         time_dict['rec'] = elapse
@@ -109,6 +117,7 @@ class TextSystem(object):
         if self.args.save_crop_res:
             self.draw_crop_rec_res(self.args.crop_res_save_dir, img_crop_list,
                                    rec_res)
+        '''修改：
         filter_boxes, filter_rec_res = [], []
         for box, rec_result in zip(dt_boxes, rec_res):
             text, score = rec_result
@@ -118,6 +127,25 @@ class TextSystem(object):
         end = time.time()
         time_dict['all'] = end - start
         return filter_boxes, filter_rec_res, time_dict
+        # 修改为如下代码
+        '''
+        filter_boxes, filter_diycls_res, filter_rec_res = [], [], []
+        if self.use_diy_cls and diycls:
+            for box,rec_reuslt, diycls_result in zip(dt_boxes, rec_res, diycls_list):
+                text, score = rec_reuslt
+                if score >= self.drop_score :
+                    filter_boxes.append(box)
+                    filter_rec_res.append(rec_reuslt)
+                    filter_diycls_res.append(diycls_result)
+            return filter_boxes, filter_rec_res, filter_diycls_res
+        else:
+            for box, rec_reuslt in zip(dt_boxes, rec_res):
+                text, score = rec_reuslt
+                if score >= self.drop_score:
+                    filter_boxes.append(box)
+                    filter_rec_res.append(rec_reuslt)
+            return filter_boxes, filter_rec_res
+
 
 
 def sorted_boxes(dt_boxes):
@@ -187,7 +215,15 @@ def main(args):
             imgs = img[:page_num]
         for index, img in enumerate(imgs):
             starttime = time.time()
-            dt_boxes, rec_res, time_dict = text_sys(img)
+            #dt_boxes, rec_res, time_dict = text_sys(img)
+            # text_sys现在返回的结果视参数可能为3~4个，所以需要先行判断再unpack
+            # dt_boxes, rec_res = text_sys(img)
+            result = text_sys(img)
+            if len(result) == 3:
+                dt_boxes, rec_res, time_dict = result
+                diycls_res = None
+            else:
+                dt_boxes, rec_res, time_dict, diycls_res = result
             elapse = time.time() - starttime
             total_time += elapse
             if len(imgs) > 1:
@@ -217,8 +253,20 @@ def main(args):
             if is_visualize:
                 image = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
                 boxes = dt_boxes
-                txts = [rec_res[i][0] for i in range(len(rec_res))]
-                scores = [rec_res[i][1] for i in range(len(rec_res))]
+                # 修改下面两行
+                #txts = [rec_res[i][0] for i in range(len(rec_res))]
+                #scores = [rec_res[i][1] for i in range(len(rec_res))]
+                txts, scores = [], []
+                for i in range(len(rec_res)):
+                    scores.append(rec_res[i][1])
+                    if diycls_res is not None:
+                        # 可视化时，在每个识别结果前加上标识：[P]表示印刷，[H]表示手写
+                        #porh_tip = '[P]' if porh_res[i][0] == '0' else '[H]' 
+                        #txts.append(porh_tip+rec_res[i][0])
+                        # 待修改~~
+                        pass
+                    else:
+                        txts.append(rec_res[i][0])
 
                 draw_img = draw_ocr_box_txt(
                     image,
