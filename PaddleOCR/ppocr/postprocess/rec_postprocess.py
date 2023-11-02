@@ -16,12 +16,13 @@ import numpy as np
 import paddle
 from paddle.nn import functional as F
 import re
-import os
 
 class BaseRecLabelDecode(object):
     """ Convert between text-label and text-index """
 
-    def __init__(self, character_dict_path=None, use_space_char=False):
+    # 由于其他类均继承自BaseRecLabelDecode，为了使代码能用在更多地方，修改基类代码，增加limit_char_dict和exclude_char_dict两个参数，可以是文件、列表
+    # 此类中没有pred，但decode里面有相关text操作和识别概率，还有现成的ignored_tokens
+    def __init__(self, character_dict_path=None, use_space_char=False, limit_char_list=None, exclude_char_list=None):
         self.beg_str = "sos"
         self.end_str = "eos"
         self.reverse = False
@@ -47,7 +48,24 @@ class BaseRecLabelDecode(object):
         for i, char in enumerate(dict_character):
             self.dict[char] = i
         self.character = dict_character
-        #print(self.character_str)   #Add
+
+        # 读取命令行参数，将文件内容读取赋值给类属性limit_char_list和exclude_char_list
+        self.limit_char_list = []
+        if limit_char_list is not None:
+            with open(limit_char_list, "rb") as fin:
+                lines = fin.readlines()
+                for line in lines:
+                    line = line.decode('utf-8').strip("\n").strip("\r\n")
+                    self.limit_char_list.append(line)
+        self.exclude_char_list = []
+        if exclude_char_list is not None:
+            with open(exclude_char_list, "rb") as fin:
+                lines = fin.readlines()
+                for line in lines:
+                    line = line.decode('utf-8').strip("\n").strip("\r\n")
+                    self.exclude_char_list.append(line)
+        # print("BaseRecLabelDecode.init", self.limit_char_list)  # 测试
+        # self.character和模型有关，不能随意修改，比如将其改为0-9，使用的模型训练分类更多，中间会出错
     def pred_reverse(self, pred):
         # 连续的a-Z0-9等字符及空格，当成一个元素，其余字符（阿拉伯字符从右向左）单独一个元素放列表里
         # 对列表反序输出（其中连续的英文、数字、字符当成一个整体不会反序）
@@ -72,7 +90,16 @@ class BaseRecLabelDecode(object):
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
         """ convert text-index into text-label. """
         result_list = []
-        ignored_tokens = self.get_ignored_tokens()
+        ignored_tokens = self.get_ignored_tokens()  # 注意这里是character中的序号列表，而不是字符列表
+        # 如果exclude_char_list不为空，将其中的字符的序号添加到ignored_tokens中
+        if len(self.exclude_char_list) > 0:
+            more_ignored = [ self.character.index(c) for c in self.exclude_char_list if c in self.character ]
+            ignored_tokens.extend(more_ignored)
+        # 如果limit_char_list不为空，将character中除了limit_char_list的所有字符加入到ignored_tokens
+        # 字符在self.character中的次序见文件：PaddleOCR\ppocr\utils\ppocr_keys_v1.txt，0-9并不连续
+        if len(self.limit_char_list) > 0:
+            limit_character = [ self.character.index(c) for c in self.character if c in self.limit_char_list
+                             and self.character.index(c) not in ignored_tokens ]
         batch_size = len(text_index)
         for batch_idx in range(batch_size):
             selection = np.ones(len(text_index[batch_idx]), dtype=bool)
@@ -81,6 +108,9 @@ class BaseRecLabelDecode(object):
                     batch_idx][:-1]
             for ignored_token in ignored_tokens:
                 selection &= text_index[batch_idx] != ignored_token
+            if len(self.limit_char_list)>0:
+                for idx, char in enumerate(text_index[batch_idx]):
+                    selection[idx] &= char in limit_character
             char_list = [
                 self.character[text_id]
                 for text_id in text_index[batch_idx][selection]
@@ -107,59 +137,24 @@ class BaseRecLabelDecode(object):
 class CTCLabelDecode(BaseRecLabelDecode):
     """ Convert between text-label and text-index """
 
-    def __init__(self, character_dict_path=None, use_space_char=False,
+    def __init__(self, character_dict_path=None, use_space_char=False,limit_char_list=None,exclude_char_list=None,
                  **kwargs):
         super(CTCLabelDecode, self).__init__(character_dict_path,
-                                             use_space_char)
-        self.limit_char_dict = ""
-        self.exclude_char_list = ""
+                                             use_space_char,
+                                             **kwargs)
+        self.limit_char_list=limit_char_list
+        self.exclude_char_list=exclude_char_list
+        print('CTCLabelDecode init finished',self.limit_char_list)
 
-    def __call__(self, preds, label=None, rec_limit_char_dict="",rec_exclude_char_dict="", *args, **kwargs):
+
+    def __call__(self, preds, label=None,  *args, **kwargs):
         if isinstance(preds, tuple) or isinstance(preds, list):
             preds = preds[-1]
         if isinstance(preds, paddle.Tensor):
             preds = preds.numpy()
-        if os.path.isfile(rec_limit_char_dict):   # 新增，判定是否指定识别字符范围，默认为空串——不指定范围
-            with open(rec_limit_char_dict, "rb") as fin:
-                lines = fin.readlines()
-                for line in lines:
-                    line = line.decode('utf-8').strip("\n").strip("\r\n")
-                    self.limit_char_list.append(line)
-        elif rec_limit_char_dict !="":      # 注意：当文件名写错的时候【既不是文件、也不为空】，可能会当成给定的字符范围，导致结果错误（不会提示出错）
-            self.limit_char_list = list(rec_limit_char_dict)
-        if os.path.isfile(rec_exclude_char_dict):   # 是否指定了需要排除的字符，如果某个字符即指定了排除、也指定了识别，排除的优先级更高
-            with open(rec_exclude_char_dict, "rb") as fin:
-                lines = fin.readlines()
-                for line in lines:
-                    line = line.decode('utf-8').strip("\n").strip("\r\n")
-                    self.exclude_char_list.append(line)
-        elif rec_exclude_char_dict !="":
-            self.exclude_char_list = list(rec_exclude_char_dict)
 
-        if rec_limit_char_dict =="" and rec_exclude_char_dict=="":
-            preds_idx = preds.argmax(axis=2)   #未指定特定字符，正常识别
-            preds_prob = preds.max(axis=2)  
-        else:
-            # 如果指定了识别字符范围，在识别结果中挑选出给出在字符概率，找到其中的最大概率值
-            if limit_char_list is None:  # 仅指定排除字符时，先将限制查找字符设置为整个字符集
-                limit_char_list = self.character
-            else:
-                limit_char_list.append("blank")  # 必须增加空值【此项是self.character中的第一项，必须加上！！】
-            # 去掉需要排除的字符
-            limit_char_list = [x for x in limit_char_list if x not in self.exclude_char_list]
-            # 获取要识别的字符（比如0-9）在整个字符集self.character中的位置Index
-            char_ind = [self.character.index(char) for char in limit_char_list]
-            # [26, 93, 25, 94, 632, 631, 933, 29, 27, 1109, 0] 不连续的，和chinese_dict.txt中的次序不一样！
-            # 从preds结果中筛选出我们需要识别字符的概率数据
-            my_preds=preds[:,:,char_ind]
-            # 获取my_preds中的最大概率和对应索引及概率值
-            my_preds_idx = my_preds.argmax(axis=2)  # 注意返回的最大概率序号是mypreds中的序号，也是limit_char_list中的序号，不是preds中的序号
-            preds_prob = my_preds.max(axis=2)
-            # 将序号列表中自定义字符中的次序修改为self.character中的次序
-            preds_idx = np.empty(shape=preds_prob.shape)
-            for i,row in enumerate(my_preds_idx):
-                preds_idx[i,:] = [ char_ind[j] for j in row ]
-            preds_idx = preds_idx.astype(int)
+        preds_idx = preds.argmax(axis=2)   
+        preds_prob = preds.max(axis=2)  
 
         text = self.decode(preds_idx, preds_prob, is_remove_duplicate=True)
         if label is None:

@@ -122,6 +122,10 @@ class TextRecognizer(object):
                 "character_dict_path": args.rec_char_dict_path,
                 "use_space_char": args.use_space_char
             }
+        # 新增两个参数
+        postprocess_params['limit_char_list'] = args.limit_char_list  # 需要在utility.py中新增命令行参数limit_char_list
+        postprocess_params['exclude_char_list'] = args.exclude_char_list # 需要在utility.py中新增命令行参数exclude_char_list
+
         self.postprocess_op = build_post_process(postprocess_params)
         self.predictor, self.input_tensor, self.output_tensors, self.config = \
             utility.create_predictor(args, 'rec', logger)

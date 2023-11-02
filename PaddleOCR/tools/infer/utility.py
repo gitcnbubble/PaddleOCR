@@ -26,7 +26,6 @@ import time
 import random
 from ppocr.utils.logging import get_logger
 
-
 def str2bool(v):
     return v.lower() in ("true", "yes", "t", "y", "1")
 
@@ -156,9 +155,9 @@ def init_args():
     parser.add_argument("--cls_diymodel_dir", type=str)    # 模型位置
     parser.add_argument("--diycls_label_list", type=list, default=['0', '1'])  # 默认二分类
 
-    # 注意多字符识别会不会出现错误！
-    parser.add_argument("--rec_limit_char_dict",type=str, default="")  # 在给定字符范围内识别，输入字典文件或字符串
-    parser.add_argument("--rec_exclude_char_dict",type=str, default="")  # 在识别中不要识别哪些字符，输入字典文件或字符串
+    # 新增两个参数
+    parser.add_argument("--limit_char_list", type=str, default=None)  # 在给定字符范围内识别，输入字典文件
+    parser.add_argument("--exclude_char_list", type=str, default=None)  # 在识别中不要识别哪些字符，输入字典文件
     return parser
 
 
