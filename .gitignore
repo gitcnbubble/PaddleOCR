@@ -1,12 +1,9 @@
-# Git学习.md
 使用缩小的图片，识别结果更少了！.png
 同时修改drop_score、det_db_thresh、det_db_box_thresh【debug中的结果显示117，结果实际增加到71】.png
 自适应阈值二值化图片.py
 PaddleOCR学习.ipynb
 output.png
-# Git学习.md
-# Git学习.md
+
 修改drop_score结果对比——无差异？.png
 .vscode/settings.json
-PaddleOCR/11-out-out.png
-# Git学习.md
+

@@ -121,7 +121,7 @@ decode函数已经包含了排除ignored_tokens中的字符的筛选功能，所
 
 针对240*534的手写数字图片（如图）测试：
 
-![Alt text](11-out-out.png)
+![测试图片](11-out-out-1.png)
 
 未指定识别字符范围时，识别速度0.4：
 
@@ -299,9 +299,46 @@ paddleocr --image_dir=11-out-out.png
 
 **优缺点**：相比思路二对代码修改数量略多，对运行效率影响减小。
 
+## 使用方式
+
+正常安装PaddleOCR，Windows系统中使用everything等工具查找paddleocr\tools\infer\utility.py文件位置。注意是安装后的文件，不是git下来的源码文件，一般在sit-packages里面。
+
+![Alt text](findfile.png)
+
+其余文件根据相对路径进行查找。
+
+按照 [主要需要修改的文件](#主要需要修改的文件) 单独修改相应文件中的代码；也可以下载涉及的文件直接替换，替换前建议将本机文件备份。
+
+变更文件汇总：
+
++ paddleocr\tools\infer\utility.py
++ paddleocr\tools\infer\predict_rec.py
++ paddleocr\ppocr\postprocess\rec_postprocess.py
+
+CMD命令行中执行：见之前的测试示例
+
+python中使用示例：
+
+```python
+import os
+import cv2
+from paddleocr import  PaddleOCR
+
+ocr = PaddleOCR(limit_char_list = r".\dict.txt",
+                use_gpu=True,  # 等其他参数设置)
+img_path = "11-out-out.png"
+result = ocr.ocr(img_path, rec=True)
+
+for idx in range(len(result)):
+    res = result[idx]
+    for line in res:
+        print(line)
+```
+
 ## 总结
 
-本修改方案仅通过后处理过程，对识别结果进行筛选，前提是需要我们提前知道我们想要识别的文档中包含哪些字符，避免出现不希望的识别结果。
+本修改方案仅通过后处理过程，对识别结果进行筛选，前提是需要我们提前知道我们想要识别的文档中包含哪些字符，避免出现不希望的识别结果。可以用来对某类图片、特定区域（比如截图识别）其结果准确性进行改进。
+
 程序不涉及检测，所以对与目标检测漏检情况没有改善。
 
 
@@ -315,5 +352,5 @@ paddleocr --image_dir=11-out-out.png
 + 了解其他已经训练好的分类相关的模型（方向、字体、语言、公式等），有无可下载模型，如何加入插件
 
 
-针对某个版式的表格，如何不通过训练提高准确率，相当于已知分类，因为表格相同位置处的内容是/格式是固定的。
+针对某个版式的表格，如何不通过训练或很少的样本训练提高准确率，相当于已知分类，因为表格相同位置处的内容是/格式是固定的。
 
